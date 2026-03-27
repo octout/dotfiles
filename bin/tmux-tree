@@ -157,6 +157,10 @@ build_tree() {
     local root_slash="${root%/}/"
     local root_len=${#root_slash}
 
+    # worktree内を閲覧中はフィルタ無効
+    local filter_worktrees=false
+    [[ "$root" != *"/.claude/worktrees/"* ]] && filter_worktrees=true
+
     # インデント文字列を事前計算
     local -a indent_plain=("") indent_colored=("")
     local d
@@ -172,7 +176,7 @@ build_tree() {
             continue
         fi
         # .claude/worktrees はツリーに表示しない
-        [[ "$rel" == ".claude/worktrees"* ]] && continue
+        $filter_worktrees && [[ "$filepath" == *"/.claude/worktrees"* ]] && continue
 
         local stripped="${rel//[^\/]/}"
         local depth=${#stripped}
@@ -243,8 +247,11 @@ render() {
     else
         local branch_info=""
         $IS_GIT_REPO && [[ -n "$GIT_BRANCH" ]] && branch_info=" ${C_BRANCH}[${GIT_BRANCH}]${C_RESET}"
-        $IS_WORKTREE && branch_info+=" ${C_WORKTREE}[worktree]${C_RESET}"
-        buf+="${C_HEADER}  ${DISPLAY_ROOT}${C_RESET}${branch_info}${CLR}${NL}"
+        if $IS_WORKTREE; then
+            buf+="${C_WORKTREE}  [worktree]${C_RESET}${branch_info}${CLR}${NL}"
+        else
+            buf+="${C_HEADER}  ${DISPLAY_ROOT}${C_RESET}${branch_info}${CLR}${NL}"
+        fi
     fi
     buf+="${C_TREE}${HR}${C_RESET}${CLR}${NL}"
 
@@ -392,6 +399,7 @@ move_cursor() {
 # --- ファイルを開く ---
 open_file() {
     (( ${#PLAINS[@]} == 0 )) && return
+    [[ "${TYPES[$CURSOR]}" == "w" ]] && { enter_worktree; return; }
     local path="${PATHS[$CURSOR]}"
 
     if [[ -d "$path" ]]; then
