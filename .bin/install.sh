@@ -21,6 +21,7 @@ link_dotfile() {
         echo "  backup: $dest -> ${dest}.bak"
     fi
 
+    mkdir -p "$(dirname "$dest")"
     ln -s "$src" "$dest"
     echo "  link: $dest -> $src"
 }
@@ -48,6 +49,7 @@ setup_path() {
 
 echo "==> Linking dotfiles..."
 link_dotfile .tmux.conf
+link_dotfile .claude/CLAUDE.md
 
 echo "==> Setting up PATH..."
 setup_path

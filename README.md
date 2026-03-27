@@ -19,6 +19,7 @@ git clone <repo-url> ~/bin
 | パス | 説明 |
 |------|------|
 | `.bin/` | 自作スクリプト・ツール (PATH に追加される) |
+| `.claude/CLAUDE.md` | Claude Code グローバル設定 |
 | `.tmux.conf` | tmux 設定 |
 
 ## ツール

@@ -248,8 +248,8 @@ move_cursor() {
     (( total == 0 )) && return
 
     case "$1" in
-        up)     (( CURSOR > 0 )) && ((CURSOR--)) || return ;;
-        down)   (( CURSOR < total - 1 )) && ((CURSOR++)) || return ;;
+        up)     (( CURSOR > 0 )) || return; ((CURSOR--)) ;;
+        down)   (( CURSOR < total - 1 )) || return; ((CURSOR++)) ;;
         top)    (( CURSOR == 0 )) && return; CURSOR=0 ;;
         bottom) (( CURSOR == total - 1 )) && return; CURSOR=$((total - 1)) ;;
     esac
