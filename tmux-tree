@@ -1,0 +1,304 @@
+#!/usr/bin/env bash
+#
+# tmux-tree: tmux pane内で動作するファイルツリーブラウザ
+# 依存: bash(4+), find, tput, tmux
+#
+set -u
+
+# --- 設定 ---
+MAX_DEPTH="${TMUX_TREE_DEPTH:-4}"
+ROOT_DIR="${1:-.}"
+IGNORE_PATTERN="${TMUX_TREE_IGNORE:-.git|node_modules|__pycache__|.venv|.cache}"
+EDITOR_CMD="${TMUX_TREE_EDITOR:-vim}"
+SPLIT_DIR="${TMUX_TREE_SPLIT:-h}"
+
+# --- エスケープシーケンス (すべて $'' で事前展開) ---
+CLR=$'\e[K'
+NL=$'\n'
+NOWRAP=$'\e[?7l'
+WRAP=$'\e[?7h'
+
+C_RESET=$'\e[0m'
+C_DIR=$'\e[1;34m'
+C_CURSOR=$'\e[30;47m'
+C_HEADER=$'\e[1;32m'
+C_TREE=$'\e[90m'
+
+# --- 状態 ---
+declare -a PLAINS=()
+declare -a COLORED=()
+declare -a PATHS=()
+declare -a TYPES=()
+declare -A EXPANDED=()
+CURSOR=0
+SCROLL_OFFSET=0
+TERM_LINES=0
+TERM_COLS=0
+VISIBLE=0
+HR=""
+DISPLAY_ROOT=""
+
+# --- ターミナルサイズ更新 ---
+update_term_size() {
+    TERM_LINES=$(tput lines)
+    TERM_COLS=$(tput cols)
+    VISIBLE=$((TERM_LINES - 4))
+    (( VISIBLE < 1 )) && VISIBLE=1
+    printf -v HR '%*s' "$TERM_COLS" ''
+    HR="${HR// /─}"
+}
+
+# --- 表示パス更新 ---
+update_display_root() {
+    DISPLAY_ROOT="$(cd "$ROOT_DIR" && pwd)"
+    DISPLAY_ROOT="${DISPLAY_ROOT/#$HOME/\~}"
+}
+
+# --- ツリー構築 ---
+build_tree() {
+    PLAINS=()
+    COLORED=()
+    PATHS=()
+    TYPES=()
+
+    local root
+    root="$(cd "$ROOT_DIR" && pwd)"
+    local root_slash="${root%/}/"
+    local root_len=${#root_slash}
+
+    while IFS= read -r filepath; do
+        local rel="${filepath:$root_len}"
+
+        if [[ -n "$IGNORE_PATTERN" && "$rel" =~ (^|/)($IGNORE_PATTERN)(/|$) ]]; then
+            continue
+        fi
+
+        local stripped="${rel//[^\/]/}"
+        local depth=${#stripped}
+
+        if (( depth > 0 )); then
+            local parent_rel="${rel%/*}"
+            local vis=true
+            local check="$parent_rel"
+            while [[ -n "$check" ]]; do
+                if [[ "${EXPANDED[$check]:-}" != "1" ]]; then
+                    vis=false
+                    break
+                fi
+                [[ "$check" == */* ]] && check="${check%/*}" || break
+            done
+            [[ "$vis" == "false" ]] && continue
+        fi
+
+        local ip="" ic="" i
+        for ((i=0; i<depth; i++)); do
+            ip+="│ "
+            ic+="${C_TREE}│ ${C_RESET}"
+        done
+
+        local name="${rel##*/}"
+
+        if [[ -d "$filepath" ]]; then
+            local m="▸"
+            [[ "${EXPANDED[$rel]:-}" == "1" ]] && m="▾"
+            PLAINS+=("${ip}${m} ${name}/")
+            COLORED+=("${ic}${C_DIR}${m} ${name}/${C_RESET}")
+            TYPES+=("d")
+        else
+            PLAINS+=("${ip}├ ${name}")
+            COLORED+=("${ic}${C_TREE}├ ${C_RESET}${name}")
+            TYPES+=("f")
+        fi
+        PATHS+=("$filepath")
+    done < <(find "$root" -maxdepth "$MAX_DEPTH" -not -path "$root" 2>/dev/null | LC_ALL=C sort)
+
+    local total=${#PLAINS[@]}
+    if (( total == 0 )); then
+        CURSOR=0
+    elif (( CURSOR >= total )); then
+        CURSOR=$((total - 1))
+    fi
+
+    update_display_root
+}
+
+# --- 描画 (バッファ一括出力, サブシェルなし) ---
+render() {
+    # スクロール調整
+    if (( CURSOR < SCROLL_OFFSET )); then
+        SCROLL_OFFSET=$CURSOR
+    elif (( CURSOR >= SCROLL_OFFSET + VISIBLE )); then
+        SCROLL_OFFSET=$((CURSOR - VISIBLE + 1))
+    fi
+
+    local total=${#PLAINS[@]}
+    local pos=$(( total > 0 ? CURSOR + 1 : 0 ))
+
+    # バッファ構築 (サブシェルゼロ)
+    local buf="${NOWRAP}"           # 自動折り返し無効
+    buf+=$'\e[H'                   # カーソルをホームへ
+
+    # ヘッダ
+    buf+="${C_HEADER}  ${DISPLAY_ROOT}${C_RESET}${CLR}${NL}"
+    buf+="${C_TREE}${HR}${C_RESET}${CLR}${NL}"
+
+    # ファイル一覧
+    local i
+    for ((i=SCROLL_OFFSET; i<SCROLL_OFFSET+VISIBLE; i++)); do
+        if (( i >= 0 && i < total )); then
+            if (( i == CURSOR )); then
+                buf+="${C_CURSOR}${PLAINS[$i]}${CLR}${C_RESET}${NL}"
+            else
+                buf+="${COLORED[$i]}${CLR}${NL}"
+            fi
+        else
+            buf+="${CLR}${NL}"
+        fi
+    done
+
+    # フッタ (最終行は NL なし → スクロール防止)
+    buf+="${C_TREE}${HR}${C_RESET}${CLR}${NL}"
+    buf+=" ${C_TREE}j/k Enter Space h/l r q [${pos}/${total}]${C_RESET}${CLR}"
+
+    # 一括出力
+    printf '%s' "$buf"
+}
+
+# --- カーソル移動 ---
+move_cursor() {
+    local total=${#PLAINS[@]}
+    (( total == 0 )) && return
+
+    case "$1" in
+        up)     (( CURSOR > 0 )) && ((CURSOR--)) || return ;;
+        down)   (( CURSOR < total - 1 )) && ((CURSOR++)) || return ;;
+        top)    (( CURSOR == 0 )) && return; CURSOR=0 ;;
+        bottom) (( CURSOR == total - 1 )) && return; CURSOR=$((total - 1)) ;;
+    esac
+
+    render
+}
+
+# --- ファイルを開く ---
+open_file() {
+    (( ${#PLAINS[@]} == 0 )) && return
+    local path="${PATHS[$CURSOR]}"
+
+    if [[ -d "$path" ]]; then
+        toggle_collapse
+        return
+    fi
+
+    if [[ -n "${TMUX:-}" ]]; then
+        tmux split-window -"$SPLIT_DIR" -d "$EDITOR_CMD" "$path"
+    else
+        "$EDITOR_CMD" "$path"
+    fi
+}
+
+# --- 展開トグル ---
+toggle_collapse() {
+    (( ${#PLAINS[@]} == 0 )) && return
+    local path="${PATHS[$CURSOR]}"
+    [[ ! -d "$path" ]] && return
+
+    local root
+    root="$(cd "$ROOT_DIR" && pwd)"
+    local rel="${path#$root/}"
+
+    if [[ "${EXPANDED[$rel]:-}" == "1" ]]; then
+        unset 'EXPANDED[$rel]'
+    else
+        EXPANDED["$rel"]="1"
+    fi
+    build_tree
+    render
+}
+
+# --- ディレクトリに入る ---
+enter_dir() {
+    (( ${#PLAINS[@]} == 0 )) && return
+    local path="${PATHS[$CURSOR]}"
+    [[ ! -d "$path" ]] && return
+
+    ROOT_DIR="$path"
+    CURSOR=0
+    SCROLL_OFFSET=0
+    EXPANDED=()
+    build_tree
+    render
+}
+
+# --- 親ディレクトリへ ---
+go_parent() {
+    local current
+    current="$(cd "$ROOT_DIR" && pwd)"
+    local parent="${current%/*}"
+    [[ -z "$parent" ]] && parent="/"
+    [[ "$parent" == "$current" ]] && return
+
+    ROOT_DIR="$parent"
+    CURSOR=0
+    SCROLL_OFFSET=0
+    EXPANDED=()
+    build_tree
+    render
+}
+
+# --- キー入力 ---
+handle_input() {
+    local key
+    IFS= read -rsn1 key
+
+    case "$key" in
+        j) move_cursor down ;;
+        k) move_cursor up ;;
+        g) move_cursor top ;;
+        G) move_cursor bottom ;;
+        "") open_file ;;
+        " ") toggle_collapse ;;
+        l)  (( ${#PLAINS[@]} > 0 )) && {
+                [[ "${TYPES[$CURSOR]}" == "d" ]] && enter_dir || open_file
+            } ;;
+        h) go_parent ;;
+        r) build_tree; render ;;
+        q) exit 0 ;;
+        $'\e')
+            local seq
+            IFS= read -rsn2 -t 0.05 seq
+            case "$seq" in
+                '[A') move_cursor up ;;
+                '[B') move_cursor down ;;
+                '[C') (( ${#PLAINS[@]} > 0 )) && {
+                          [[ "${TYPES[$CURSOR]}" == "d" ]] && enter_dir || open_file
+                      } ;;
+                '[D') go_parent ;;
+            esac ;;
+    esac
+}
+
+# --- クリーンアップ ---
+cleanup() {
+    printf '%s' "${WRAP}"  # 自動折り返し復帰
+    tput cnorm
+    tput rmcup
+    stty echo 2>/dev/null
+}
+
+# --- メイン ---
+main() {
+    tput smcup
+    tput civis
+    trap cleanup EXIT
+    trap 'update_term_size; render' WINCH
+
+    update_term_size
+    build_tree
+    render
+
+    while true; do
+        handle_input
+    done
+}
+
+main
