@@ -50,6 +50,7 @@ IS_GIT_REPO=false
 declare -A GIT_STATUS=()
 _GIT_SPLAIN=""
 _GIT_SCOLORED=""
+EDITOR_PANE=""
 
 # --- ターミナルサイズ更新 ---
 update_term_size() {
@@ -269,7 +270,14 @@ open_file() {
     fi
 
     if [[ -n "${TMUX:-}" ]]; then
-        tmux split-window -"$SPLIT_DIR" -d "$EDITOR_CMD" "$path"
+        if [[ -n "$EDITOR_PANE" ]] && tmux list-panes -F '#{pane_id}' | grep -qF "$EDITOR_PANE"; then
+            tmux send-keys -t "$EDITOR_PANE" Escape
+            tmux send-keys -t "$EDITOR_PANE" -l ":edit ${path// /\\ }"
+            tmux send-keys -t "$EDITOR_PANE" Enter
+        else
+            EDITOR_PANE=$(tmux split-window -"$SPLIT_DIR" -P -F '#{pane_id}' "$EDITOR_CMD" "$path")
+        fi
+        tmux select-pane -t "$EDITOR_PANE"
     else
         "$EDITOR_CMD" "$path"
     fi
