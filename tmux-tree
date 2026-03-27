@@ -23,6 +23,11 @@ C_DIR=$'\e[1;34m'
 C_CURSOR=$'\e[30;47m'
 C_HEADER=$'\e[1;32m'
 C_TREE=$'\e[90m'
+C_MOD=$'\e[1;33m'
+C_ADD=$'\e[1;32m'
+C_DEL=$'\e[1;31m'
+C_UNT=$'\e[1;31m'
+C_BRANCH=$'\e[1;33m'
 
 # --- 状態 ---
 declare -a PLAINS=()
@@ -37,6 +42,9 @@ TERM_COLS=0
 VISIBLE=0
 HR=""
 DISPLAY_ROOT=""
+GIT_BRANCH=""
+IS_GIT_REPO=false
+declare -A GIT_STATUS=()
 
 # --- ターミナルサイズ更新 ---
 update_term_size() {
@@ -54,6 +62,62 @@ update_display_root() {
     DISPLAY_ROOT="${DISPLAY_ROOT/#$HOME/\~}"
 }
 
+# --- git情報取得 ---
+update_git_info() {
+    local root
+    root="$(cd "$ROOT_DIR" && pwd)"
+
+    if git -C "$root" rev-parse --is-inside-work-tree &>/dev/null; then
+        IS_GIT_REPO=true
+        GIT_BRANCH="$(git -C "$root" branch --show-current 2>/dev/null)"
+        [[ -z "$GIT_BRANCH" ]] && GIT_BRANCH="$(git -C "$root" rev-parse --short HEAD 2>/dev/null)"
+    else
+        IS_GIT_REPO=false
+        GIT_BRANCH=""
+    fi
+
+    GIT_STATUS=()
+    $IS_GIT_REPO || return
+
+    local git_root
+    git_root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)"
+
+    local line xy fpath
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        xy="${line:0:2}"
+        fpath="${line:3}"
+        # rename の場合 "R  old -> new" を new だけにする
+        [[ "$fpath" == *" -> "* ]] && fpath="${fpath##* -> }"
+        GIT_STATUS["$fpath"]="$xy"
+        # ディレクトリにも伝搬
+        local dir="$fpath"
+        while [[ "$dir" == */* ]]; do
+            dir="${dir%/*}"
+            [[ -z "${GIT_STATUS[$dir]:-}" ]] && GIT_STATUS["$dir"]="*"
+        done
+    done < <(git -C "$git_root" status --porcelain 2>/dev/null)
+}
+
+# --- gitステータスラベル生成 ---
+git_status_label() {
+    $IS_GIT_REPO || return
+    local rel="$1"
+    local st="${GIT_STATUS[$rel]:-}"
+    [[ -z "$st" ]] && return
+
+    local plain="" colored=""
+    case "$st" in
+        "??") plain=" ?"; colored=" ${C_UNT}?${C_RESET}" ;;
+        *M*)  plain=" M"; colored=" ${C_MOD}M${C_RESET}" ;;
+        *A*)  plain=" A"; colored=" ${C_ADD}A${C_RESET}" ;;
+        *D*)  plain=" D"; colored=" ${C_DEL}D${C_RESET}" ;;
+        *R*)  plain=" R"; colored=" ${C_MOD}R${C_RESET}" ;;
+        "*")  plain=" *"; colored=" ${C_MOD}*${C_RESET}" ;;
+    esac
+    printf '%s\x1f%s' "$plain" "$colored"
+}
+
 # --- ツリー構築 ---
 build_tree() {
     PLAINS=()
@@ -61,10 +125,17 @@ build_tree() {
     PATHS=()
     TYPES=()
 
+    update_git_info
+
     local root
     root="$(cd "$ROOT_DIR" && pwd)"
     local root_slash="${root%/}/"
     local root_len=${#root_slash}
+
+    local git_root=""
+    if $IS_GIT_REPO; then
+        git_root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)"
+    fi
 
     while IFS= read -r filepath; do
         local rel="${filepath:$root_len}"
@@ -98,15 +169,23 @@ build_tree() {
 
         local name="${rel##*/}"
 
+        # gitステータス取得
+        local git_rel=""
+        $IS_GIT_REPO && git_rel="${filepath#$git_root/}"
+        local slabel=""
+        slabel="$(git_status_label "$git_rel")"
+        local splain="${slabel%%$'\x1f'*}"
+        local scolored="${slabel#*$'\x1f'}"
+
         if [[ -d "$filepath" ]]; then
             local m="▸"
             [[ "${EXPANDED[$rel]:-}" == "1" ]] && m="▾"
-            PLAINS+=("${ip}${m} ${name}/")
-            COLORED+=("${ic}${C_DIR}${m} ${name}/${C_RESET}")
+            PLAINS+=("${ip}${m} ${name}/${splain}")
+            COLORED+=("${ic}${C_DIR}${m} ${name}/${C_RESET}${scolored}")
             TYPES+=("d")
         else
-            PLAINS+=("${ip}├ ${name}")
-            COLORED+=("${ic}${C_TREE}├ ${C_RESET}${name}")
+            PLAINS+=("${ip}├ ${name}${splain}")
+            COLORED+=("${ic}${C_TREE}├ ${C_RESET}${name}${scolored}")
             TYPES+=("f")
         fi
         PATHS+=("$filepath")
@@ -139,7 +218,9 @@ render() {
     buf+=$'\e[H'                   # カーソルをホームへ
 
     # ヘッダ
-    buf+="${C_HEADER}  ${DISPLAY_ROOT}${C_RESET}${CLR}${NL}"
+    local branch_info=""
+    $IS_GIT_REPO && [[ -n "$GIT_BRANCH" ]] && branch_info=" ${C_BRANCH}[${GIT_BRANCH}]${C_RESET}"
+    buf+="${C_HEADER}  ${DISPLAY_ROOT}${C_RESET}${branch_info}${CLR}${NL}"
     buf+="${C_TREE}${HR}${C_RESET}${CLR}${NL}"
 
     # ファイル一覧
