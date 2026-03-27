@@ -463,6 +463,11 @@ go_parent() {
     fi
     local current
     current="$(cd "$ROOT_DIR" && pwd)"
+    # worktree内からはメインリポジトリのルートに直接戻る
+    if [[ "$current" == *"/.claude/worktrees/"* && -n "$MAIN_REPO_ROOT" ]]; then
+        change_root "$MAIN_REPO_ROOT"
+        return
+    fi
     local parent="${current%/*}"
     [[ -z "$parent" ]] && parent="/"
     [[ "$parent" != "$current" ]] && change_root "$parent"
