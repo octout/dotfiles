@@ -30,6 +30,7 @@ C_ADD=$'\e[1;32m'
 C_DEL=$'\e[1;31m'
 C_UNT=$'\e[1;31m'
 C_BRANCH=$'\e[1;33m'
+C_WORKTREE=$'\e[1;35m'
 
 # --- 状態 ---
 declare -a PLAINS=()
@@ -51,6 +52,14 @@ declare -A GIT_STATUS=()
 _GIT_SPLAIN=""
 _GIT_SCOLORED=""
 EDITOR_PANE=""
+IS_WORKTREE=false
+MAIN_REPO_ROOT=""
+HAS_CLAUDE_WORKTREES=false
+VIEW_MODE="tree"
+SAVED_ROOT_DIR=""
+SAVED_CURSOR=0
+SAVED_SCROLL_OFFSET=0
+declare -A SAVED_EXPANDED=()
 
 # --- ターミナルサイズ更新 ---
 update_term_size() {
@@ -75,6 +84,19 @@ update_git_info() {
         return
     }
     IS_GIT_REPO=true
+
+    # worktree検出
+    local common_dir
+    common_dir="$(cd "$root" && cd "$(git rev-parse --git-common-dir 2>/dev/null)" && pwd)"
+    local expected_git="${GIT_ROOT}/.git"
+    if [[ "$common_dir" != "$expected_git" ]]; then
+        IS_WORKTREE=true
+        MAIN_REPO_ROOT="${common_dir%/.git}"
+    else
+        IS_WORKTREE=false
+        MAIN_REPO_ROOT="$GIT_ROOT"
+    fi
+    [[ -d "$MAIN_REPO_ROOT/.claude/worktrees" ]] && HAS_CLAUDE_WORKTREES=true || HAS_CLAUDE_WORKTREES=false
 
     local line
     while IFS= read -r line; do
@@ -149,6 +171,8 @@ build_tree() {
         if [[ -n "$IGNORE_PATTERN" && "$rel" =~ (^|/)($IGNORE_PATTERN)(/|$) ]]; then
             continue
         fi
+        # .claude/worktrees はツリーに表示しない
+        [[ "$rel" == ".claude/worktrees"* ]] && continue
 
         local stripped="${rel//[^\/]/}"
         local depth=${#stripped}
@@ -214,9 +238,14 @@ render() {
     buf+=$'\e[H'                   # カーソルをホームへ
 
     # ヘッダ
-    local branch_info=""
-    $IS_GIT_REPO && [[ -n "$GIT_BRANCH" ]] && branch_info=" ${C_BRANCH}[${GIT_BRANCH}]${C_RESET}"
-    buf+="${C_HEADER}  ${DISPLAY_ROOT}${C_RESET}${branch_info}${CLR}${NL}"
+    if [[ "$VIEW_MODE" == "worktree" ]]; then
+        buf+="${C_HEADER}  Worktrees${C_RESET} ${C_WORKTREE}[${DISPLAY_ROOT}]${C_RESET}${CLR}${NL}"
+    else
+        local branch_info=""
+        $IS_GIT_REPO && [[ -n "$GIT_BRANCH" ]] && branch_info=" ${C_BRANCH}[${GIT_BRANCH}]${C_RESET}"
+        $IS_WORKTREE && branch_info+=" ${C_WORKTREE}[worktree]${C_RESET}"
+        buf+="${C_HEADER}  ${DISPLAY_ROOT}${C_RESET}${branch_info}${CLR}${NL}"
+    fi
     buf+="${C_TREE}${HR}${C_RESET}${CLR}${NL}"
 
     # ファイル一覧
@@ -235,14 +264,115 @@ render() {
 
     # フッタ (最終行は NL なし → スクロール防止)
     buf+="${C_TREE}${HR}${C_RESET}${CLR}${NL}"
-    buf+=" ${C_TREE}j/k Enter Space h/l r q [${pos}/${total}]${C_RESET}${CLR}"
+    local help_keys
+    if [[ "$VIEW_MODE" == "worktree" ]]; then
+        help_keys="j/k Enter h/q [${pos}/${total}]"
+    elif $HAS_CLAUDE_WORKTREES; then
+        help_keys="j/k Enter Space h/l r q w [${pos}/${total}]"
+    else
+        help_keys="j/k Enter Space h/l r q [${pos}/${total}]"
+    fi
+    buf+=" ${C_TREE}${help_keys}${C_RESET}${CLR}"
 
     # 一括出力
     printf '%s' "$buf"
 }
 
 # --- リフレッシュ ---
-refresh() { build_tree; render; }
+refresh() {
+    if [[ "$VIEW_MODE" == "worktree" ]]; then
+        build_worktree_list
+    else
+        build_tree
+    fi
+    render
+}
+
+# --- worktree一覧構築 ---
+build_worktree_list() {
+    PLAINS=()
+    COLORED=()
+    PATHS=()
+    TYPES=()
+
+    local wt_dir="$MAIN_REPO_ROOT/.claude/worktrees"
+    DISPLAY_ROOT="${MAIN_REPO_ROOT/#$HOME/\~}"
+
+    # メインリポジトリ
+    local main_branch
+    main_branch="$(git -C "$MAIN_REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+    PLAINS+=("  main  [${main_branch}]")
+    COLORED+=("  ${C_DIR}main${C_RESET}  ${C_BRANCH}[${main_branch}]${C_RESET}")
+    PATHS+=("$MAIN_REPO_ROOT")
+    TYPES+=("w")
+
+    # 各worktree
+    local dir
+    for dir in "$wt_dir"/*/; do
+        [[ -d "$dir" ]] || continue
+        local name="${dir%/}"
+        name="${name##*/}"
+        local branch
+        branch="$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)" || branch="?"
+        PLAINS+=("  ${name}  [${branch}]")
+        COLORED+=("  ${C_WORKTREE}${name}${C_RESET}  ${C_BRANCH}[${branch}]${C_RESET}")
+        PATHS+=("${dir%/}")
+        TYPES+=("w")
+    done
+
+    local total=${#PLAINS[@]}
+    if (( total == 0 )); then
+        CURSOR=0
+    elif (( CURSOR >= total )); then
+        CURSOR=$((total - 1))
+    fi
+}
+
+# --- worktree一覧表示トグル ---
+toggle_worktree_view() {
+    $IS_GIT_REPO && $HAS_CLAUDE_WORKTREES || return
+
+    if [[ "$VIEW_MODE" == "tree" ]]; then
+        SAVED_ROOT_DIR="$ROOT_DIR"
+        SAVED_CURSOR=$CURSOR
+        SAVED_SCROLL_OFFSET=$SCROLL_OFFSET
+        SAVED_EXPANDED=()
+        local k
+        for k in "${!EXPANDED[@]}"; do
+            SAVED_EXPANDED["$k"]="${EXPANDED[$k]}"
+        done
+
+        VIEW_MODE="worktree"
+        CURSOR=0
+        SCROLL_OFFSET=0
+        build_worktree_list
+        render
+    else
+        restore_tree_view
+    fi
+}
+
+# --- ツリー表示に復帰 ---
+restore_tree_view() {
+    VIEW_MODE="tree"
+    ROOT_DIR="$SAVED_ROOT_DIR"
+    CURSOR=$SAVED_CURSOR
+    SCROLL_OFFSET=$SAVED_SCROLL_OFFSET
+    EXPANDED=()
+    local k
+    for k in "${!SAVED_EXPANDED[@]}"; do
+        EXPANDED["$k"]="${SAVED_EXPANDED[$k]}"
+    done
+    refresh
+}
+
+# --- worktree選択で入る ---
+enter_worktree() {
+    (( ${#PLAINS[@]} == 0 )) && return
+    local path="${PATHS[$CURSOR]}"
+    VIEW_MODE="tree"
+    change_root "$path"
+}
 
 # --- カーソル移動 ---
 move_cursor() {
@@ -319,6 +449,10 @@ enter_dir() {
 
 # --- 親ディレクトリへ ---
 go_parent() {
+    if [[ "$VIEW_MODE" == "worktree" ]]; then
+        restore_tree_view
+        return
+    fi
     local current
     current="$(cd "$ROOT_DIR" && pwd)"
     local parent="${current%/*}"
@@ -329,7 +463,11 @@ go_parent() {
 # --- ディレクトリなら入る、ファイルなら開く ---
 enter_or_open() {
     (( ${#PLAINS[@]} == 0 )) && return
-    [[ "${TYPES[$CURSOR]}" == "d" ]] && enter_dir || open_file
+    case "${TYPES[$CURSOR]}" in
+        w) enter_worktree ;;
+        d) enter_dir ;;
+        *) open_file ;;
+    esac
 }
 
 # --- キー入力 ---
@@ -350,7 +488,8 @@ handle_input() {
         l) enter_or_open ;;
         h) go_parent ;;
         r) refresh ;;
-        q) exit 0 ;;
+        w) toggle_worktree_view ;;
+        q) if [[ "$VIEW_MODE" == "worktree" ]]; then restore_tree_view; else exit 0; fi ;;
         $'\e')
             local seq
             IFS= read -rsn2 -t 0.05 seq
