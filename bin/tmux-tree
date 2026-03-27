@@ -413,7 +413,10 @@ open_file() {
             tmux send-keys -t "$EDITOR_PANE" -l ":edit ${path// /\\ }"
             tmux send-keys -t "$EDITOR_PANE" Enter
         else
-            EDITOR_PANE=$(tmux split-window -"$SPLIT_DIR" -P -F '#{pane_id}' "$EDITOR_CMD" "$path")
+            local tree_pane
+            tree_pane=$(tmux display-message -p '#{pane_id}')
+            EDITOR_PANE=$(tmux split-window -fh -P -F '#{pane_id}' "$EDITOR_CMD" "$path")
+            tmux resize-pane -t "$tree_pane" -x "$PANE_WIDTH"
         fi
         tmux select-pane -t "$EDITOR_PANE"
     else
