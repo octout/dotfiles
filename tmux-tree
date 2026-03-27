@@ -44,79 +44,76 @@ VISIBLE=0
 HR=""
 DISPLAY_ROOT=""
 GIT_BRANCH=""
+GIT_ROOT=""
 IS_GIT_REPO=false
 declare -A GIT_STATUS=()
+_GIT_SPLAIN=""
+_GIT_SCOLORED=""
 
 # --- ターミナルサイズ更新 ---
 update_term_size() {
-    TERM_LINES=$(tput lines)
-    TERM_COLS=$(tput cols)
+    TERM_LINES="${LINES:-$(tput lines)}"
+    TERM_COLS="${COLUMNS:-$(tput cols)}"
     VISIBLE=$((TERM_LINES - 4))
     (( VISIBLE < 1 )) && VISIBLE=1
     printf -v HR '%*s' "$TERM_COLS" ''
     HR="${HR// /─}"
 }
 
-# --- 表示パス更新 ---
-update_display_root() {
-    DISPLAY_ROOT="$(cd "$ROOT_DIR" && pwd)"
-    DISPLAY_ROOT="${DISPLAY_ROOT/#$HOME/\~}"
-}
-
 # --- git情報取得 ---
 update_git_info() {
-    local root
-    root="$(cd "$ROOT_DIR" && pwd)"
-
-    if git -C "$root" rev-parse --is-inside-work-tree &>/dev/null; then
-        IS_GIT_REPO=true
-        GIT_BRANCH="$(git -C "$root" branch --show-current 2>/dev/null)"
-        [[ -z "$GIT_BRANCH" ]] && GIT_BRANCH="$(git -C "$root" rev-parse --short HEAD 2>/dev/null)"
-    else
-        IS_GIT_REPO=false
-        GIT_BRANCH=""
-    fi
-
     GIT_STATUS=()
-    $IS_GIT_REPO || return
+    GIT_BRANCH=""
+    GIT_ROOT=""
 
-    local git_root
-    git_root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)"
+    local root="$1"
 
-    local line xy fpath
+    GIT_ROOT="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)" || {
+        IS_GIT_REPO=false
+        return
+    }
+    IS_GIT_REPO=true
+
+    local line
     while IFS= read -r line; do
+        if [[ "$line" == "## "* ]]; then
+            # "## branch...tracking" からブランチ名を抽出
+            local branch_part="${line#\#\# }"
+            GIT_BRANCH="${branch_part%%...*}"
+            [[ "$GIT_BRANCH" == *" "* ]] && GIT_BRANCH="${GIT_BRANCH%% *}"
+            # detached HEAD の場合
+            [[ "$GIT_BRANCH" == "HEAD" ]] && GIT_BRANCH="$(git -C "$root" rev-parse --short HEAD 2>/dev/null)"
+            continue
+        fi
         [[ -z "$line" ]] && continue
-        xy="${line:0:2}"
-        fpath="${line:3}"
-        # rename の場合 "R  old -> new" を new だけにする
+        local xy="${line:0:2}"
+        local fpath="${line:3}"
         [[ "$fpath" == *" -> "* ]] && fpath="${fpath##* -> }"
         GIT_STATUS["$fpath"]="$xy"
-        # ディレクトリにも伝搬
         local dir="$fpath"
         while [[ "$dir" == */* ]]; do
             dir="${dir%/*}"
             [[ -z "${GIT_STATUS[$dir]:-}" ]] && GIT_STATUS["$dir"]="*"
         done
-    done < <(git -C "$git_root" status --porcelain 2>/dev/null)
+    done < <(git -C "$GIT_ROOT" status --porcelain -b 2>/dev/null)
 }
 
-# --- gitステータスラベル生成 ---
+# --- gitステータスラベル生成 (結果は _GIT_SPLAIN, _GIT_SCOLORED に格納) ---
 git_status_label() {
+    _GIT_SPLAIN=""
+    _GIT_SCOLORED=""
     $IS_GIT_REPO || return
-    local rel="$1"
-    local st="${GIT_STATUS[$rel]:-}"
+    local st="${GIT_STATUS[$1]:-}"
     [[ -z "$st" ]] && return
 
-    local plain="" colored=""
     case "$st" in
-        "??") plain=" ?"; colored=" ${C_UNT}?${C_RESET}" ;;
-        *M*)  plain=" M"; colored=" ${C_MOD}M${C_RESET}" ;;
-        *A*)  plain=" A"; colored=" ${C_ADD}A${C_RESET}" ;;
-        *D*)  plain=" D"; colored=" ${C_DEL}D${C_RESET}" ;;
-        *R*)  plain=" R"; colored=" ${C_MOD}R${C_RESET}" ;;
-        "*")  plain=" *"; colored=" ${C_MOD}*${C_RESET}" ;;
+        "??") _GIT_SPLAIN=" ?"; _GIT_SCOLORED=" ${C_UNT}?${C_RESET}" ;;
+        *M*)  _GIT_SPLAIN=" M"; _GIT_SCOLORED=" ${C_MOD}M${C_RESET}" ;;
+        *A*)  _GIT_SPLAIN=" A"; _GIT_SCOLORED=" ${C_ADD}A${C_RESET}" ;;
+        *D*)  _GIT_SPLAIN=" D"; _GIT_SCOLORED=" ${C_DEL}D${C_RESET}" ;;
+        *R*)  _GIT_SPLAIN=" R"; _GIT_SCOLORED=" ${C_MOD}R${C_RESET}" ;;
+        "*")  _GIT_SPLAIN=" *"; _GIT_SCOLORED=" ${C_MOD}*${C_RESET}" ;;
     esac
-    printf '%s\x1f%s' "$plain" "$colored"
 }
 
 # --- ツリー構築 ---
@@ -126,17 +123,23 @@ build_tree() {
     PATHS=()
     TYPES=()
 
-    update_git_info
-
     local root
     root="$(cd "$ROOT_DIR" && pwd)"
+
+    update_git_info "$root"
+
+    DISPLAY_ROOT="${root/#$HOME/\~}"
+
     local root_slash="${root%/}/"
     local root_len=${#root_slash}
 
-    local git_root=""
-    if $IS_GIT_REPO; then
-        git_root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)"
-    fi
+    # インデント文字列を事前計算
+    local -a indent_plain=("") indent_colored=("")
+    local d
+    for ((d=1; d<=MAX_DEPTH; d++)); do
+        indent_plain[d]="${indent_plain[d-1]}│ "
+        indent_colored[d]="${indent_colored[d-1]}${C_TREE}│ ${C_RESET}"
+    done
 
     while IFS= read -r filepath; do
         local rel="${filepath:$root_len}"
@@ -150,43 +153,35 @@ build_tree() {
 
         if (( depth > 0 )); then
             local parent_rel="${rel%/*}"
-            local vis=true
             local check="$parent_rel"
+            local vis=1
             while [[ -n "$check" ]]; do
                 if [[ "${EXPANDED[$check]:-}" != "1" ]]; then
-                    vis=false
+                    vis=0
                     break
                 fi
                 [[ "$check" == */* ]] && check="${check%/*}" || break
             done
-            [[ "$vis" == "false" ]] && continue
+            (( vis == 0 )) && continue
         fi
 
-        local ip="" ic="" i
-        for ((i=0; i<depth; i++)); do
-            ip+="│ "
-            ic+="${C_TREE}│ ${C_RESET}"
-        done
-
+        local ip="${indent_plain[$depth]}"
+        local ic="${indent_colored[$depth]}"
         local name="${rel##*/}"
 
-        # gitステータス取得
         local git_rel=""
-        $IS_GIT_REPO && git_rel="${filepath#$git_root/}"
-        local slabel=""
-        slabel="$(git_status_label "$git_rel")"
-        local splain="${slabel%%$'\x1f'*}"
-        local scolored="${slabel#*$'\x1f'}"
+        $IS_GIT_REPO && git_rel="${filepath#$GIT_ROOT/}"
+        git_status_label "$git_rel"
 
         if [[ -d "$filepath" ]]; then
             local m="▸"
             [[ "${EXPANDED[$rel]:-}" == "1" ]] && m="▾"
-            PLAINS+=("${ip}${m} ${name}/${splain}")
-            COLORED+=("${ic}${C_DIR}${m} ${name}/${C_RESET}${scolored}")
+            PLAINS+=("${ip}${m} ${name}/${_GIT_SPLAIN}")
+            COLORED+=("${ic}${C_DIR}${m} ${name}/${C_RESET}${_GIT_SCOLORED}")
             TYPES+=("d")
         else
-            PLAINS+=("${ip}├ ${name}${splain}")
-            COLORED+=("${ic}${C_TREE}├ ${C_RESET}${name}${scolored}")
+            PLAINS+=("${ip}├ ${name}${_GIT_SPLAIN}")
+            COLORED+=("${ic}${C_TREE}├ ${C_RESET}${name}${_GIT_SCOLORED}")
             TYPES+=("f")
         fi
         PATHS+=("$filepath")
@@ -198,8 +193,6 @@ build_tree() {
     elif (( CURSOR >= total )); then
         CURSOR=$((total - 1))
     fi
-
-    update_display_root
 }
 
 # --- 描画 (バッファ一括出力, サブシェルなし) ---
@@ -246,6 +239,9 @@ render() {
     printf '%s' "$buf"
 }
 
+# --- リフレッシュ ---
+refresh() { build_tree; render; }
+
 # --- カーソル移動 ---
 move_cursor() {
     local total=${#PLAINS[@]}
@@ -284,31 +280,32 @@ toggle_collapse() {
     local path="${PATHS[$CURSOR]}"
     [[ ! -d "$path" ]] && return
 
-    local root
-    root="$(cd "$ROOT_DIR" && pwd)"
-    local rel="${path#$root/}"
+    local root_slash
+    root_slash="$(cd "$ROOT_DIR" && pwd)/"
+    local rel="${path#$root_slash}"
 
     if [[ "${EXPANDED[$rel]:-}" == "1" ]]; then
         unset 'EXPANDED[$rel]'
     else
         EXPANDED["$rel"]="1"
     fi
-    build_tree
-    render
+    refresh
+}
+
+# --- ルートディレクトリ変更 ---
+change_root() {
+    ROOT_DIR="$1"
+    CURSOR=0
+    SCROLL_OFFSET=0
+    EXPANDED=()
+    refresh
 }
 
 # --- ディレクトリに入る ---
 enter_dir() {
     (( ${#PLAINS[@]} == 0 )) && return
     local path="${PATHS[$CURSOR]}"
-    [[ ! -d "$path" ]] && return
-
-    ROOT_DIR="$path"
-    CURSOR=0
-    SCROLL_OFFSET=0
-    EXPANDED=()
-    build_tree
-    render
+    [[ -d "$path" ]] && change_root "$path"
 }
 
 # --- 親ディレクトリへ ---
@@ -317,21 +314,20 @@ go_parent() {
     current="$(cd "$ROOT_DIR" && pwd)"
     local parent="${current%/*}"
     [[ -z "$parent" ]] && parent="/"
-    [[ "$parent" == "$current" ]] && return
+    [[ "$parent" != "$current" ]] && change_root "$parent"
+}
 
-    ROOT_DIR="$parent"
-    CURSOR=0
-    SCROLL_OFFSET=0
-    EXPANDED=()
-    build_tree
-    render
+# --- ディレクトリなら入る、ファイルなら開く ---
+enter_or_open() {
+    (( ${#PLAINS[@]} == 0 )) && return
+    [[ "${TYPES[$CURSOR]}" == "d" ]] && enter_dir || open_file
 }
 
 # --- キー入力 ---
 handle_input() {
     local key
     if ! IFS= read -rsn1 -t "$REFRESH_INTERVAL" key; then
-        build_tree; render
+        refresh
         return
     fi
 
@@ -342,11 +338,9 @@ handle_input() {
         G) move_cursor bottom ;;
         "") open_file ;;
         " ") toggle_collapse ;;
-        l)  (( ${#PLAINS[@]} > 0 )) && {
-                [[ "${TYPES[$CURSOR]}" == "d" ]] && enter_dir || open_file
-            } ;;
+        l) enter_or_open ;;
         h) go_parent ;;
-        r) build_tree; render ;;
+        r) refresh ;;
         q) exit 0 ;;
         $'\e')
             local seq
@@ -354,9 +348,7 @@ handle_input() {
             case "$seq" in
                 '[A') move_cursor up ;;
                 '[B') move_cursor down ;;
-                '[C') (( ${#PLAINS[@]} > 0 )) && {
-                          [[ "${TYPES[$CURSOR]}" == "d" ]] && enter_dir || open_file
-                      } ;;
+                '[C') enter_or_open ;;
                 '[D') go_parent ;;
             esac ;;
     esac
