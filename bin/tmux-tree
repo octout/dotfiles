@@ -12,7 +12,7 @@ IGNORE_PATTERN="${TMUX_TREE_IGNORE:-.git|node_modules|__pycache__|.venv|.cache}"
 EDITOR_CMD="${TMUX_TREE_EDITOR:-vim}"
 SPLIT_DIR="${TMUX_TREE_SPLIT:-h}"
 REFRESH_INTERVAL="${TMUX_TREE_REFRESH:-5}"
-PANE_WIDTH="${TMUX_TREE_WIDTH:-30%}"
+PANE_WIDTH="${TMUX_TREE_WIDTH:-20%}"
 
 # --- エスケープシーケンス (すべて $'' で事前展開) ---
 CLR=$'\e[K'
