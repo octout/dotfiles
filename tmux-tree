@@ -11,6 +11,7 @@ ROOT_DIR="${1:-.}"
 IGNORE_PATTERN="${TMUX_TREE_IGNORE:-.git|node_modules|__pycache__|.venv|.cache}"
 EDITOR_CMD="${TMUX_TREE_EDITOR:-vim}"
 SPLIT_DIR="${TMUX_TREE_SPLIT:-h}"
+REFRESH_INTERVAL="${TMUX_TREE_REFRESH:-5}"
 
 # --- エスケープシーケンス (すべて $'' で事前展開) ---
 CLR=$'\e[K'
@@ -329,7 +330,10 @@ go_parent() {
 # --- キー入力 ---
 handle_input() {
     local key
-    IFS= read -rsn1 key
+    if ! IFS= read -rsn1 -t "$REFRESH_INTERVAL" key; then
+        build_tree; render
+        return
+    fi
 
     case "$key" in
         j) move_cursor down ;;
