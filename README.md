@@ -5,20 +5,21 @@
 ## セットアップ
 
 ```bash
-git clone <repo-url> ~/bin
-~/bin/.bin/install.sh
+git clone https://github.com/octout/dotfiles ~/dotfiles
+~/dotfiles/install.sh
 ```
 
 `install.sh` は以下を実行する:
 
 - dotfiles (`~/.tmux.conf` 等) をホームディレクトリにシンボリックリンク
-- `.bin/` を PATH に追加
+- `bin/` を PATH に追加
 
 ## 構成
 
 | パス | 説明 |
 |------|------|
-| `.bin/` | 自作スクリプト・ツール (PATH に追加される) |
+| `bin/` | 自作スクリプト・ツール (PATH に追加される) |
+| `install.sh` | セットアップスクリプト |
 | `.claude/CLAUDE.md` | Claude Code グローバル設定 |
 | `.tmux.conf` | tmux 設定 |
 

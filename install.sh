@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -eu
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_DIR="$(dirname "$SCRIPT_DIR")"
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+BIN_DIR="$REPO_DIR/bin"
 
 # --- dotfiles のシンボリックリンク作成 ---
 link_dotfile() {
@@ -35,13 +35,13 @@ setup_path() {
         shell_rc="$HOME/.bashrc"
     fi
 
-    local path_line="export PATH=\"$SCRIPT_DIR:\$PATH\""
+    local path_line="export PATH=\"$BIN_DIR:\$PATH\""
 
-    if grep -qF "$SCRIPT_DIR" "$shell_rc" 2>/dev/null; then
+    if grep -qF "$BIN_DIR" "$shell_rc" 2>/dev/null; then
         echo "  skip: PATH already configured in $shell_rc"
     else
         echo "" >> "$shell_rc"
-        echo "# dotfiles .bin" >> "$shell_rc"
+        echo "# dotfiles bin" >> "$shell_rc"
         echo "$path_line" >> "$shell_rc"
         echo "  added: PATH entry to $shell_rc"
     fi
