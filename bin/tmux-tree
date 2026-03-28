@@ -19,6 +19,8 @@ CLR=$'\e[K'
 NL=$'\n'
 NOWRAP=$'\e[?7l'
 WRAP=$'\e[?7h'
+MOUSE_ON=$'\e[?1000h\e[?1006h'
+MOUSE_OFF=$'\e[?1006l\e[?1000l'
 
 C_RESET=$'\e[0m'
 C_DIR=$'\e[1;34m'
@@ -31,6 +33,10 @@ C_DEL=$'\e[1;31m'
 C_UNT=$'\e[1;31m'
 C_BRANCH=$'\e[1;33m'
 C_WORKTREE=$'\e[1;35m'
+
+# --- レイアウト定数 ---
+HEADER_LINES=2
+FOOTER_LINES=2
 
 # --- 状態 ---
 declare -a PLAINS=()
@@ -65,7 +71,7 @@ declare -A SAVED_EXPANDED=()
 update_term_size() {
     TERM_LINES="${LINES:-$(tput lines)}"
     TERM_COLS="${COLUMNS:-$(tput cols)}"
-    VISIBLE=$((TERM_LINES - 4))
+    VISIBLE=$((TERM_LINES - HEADER_LINES - FOOTER_LINES))
     (( VISIBLE < 1 )) && VISIBLE=1
     printf -v HR '%*s' "$TERM_COLS" ''
     HR="${HR// /─}"
@@ -486,6 +492,24 @@ enter_or_open() {
     esac
 }
 
+# --- マウスイベント処理 ---
+handle_mouse() {
+    local button="$1" row="$2"
+    case "$button" in
+        0)  # 1-basedの行番号からヘッダ分を引いてエントリインデックスを算出
+            local idx=$((SCROLL_OFFSET + row - HEADER_LINES - 1))
+            local total=${#PLAINS[@]}
+            if (( idx >= 0 && idx < total )); then
+                CURSOR=$idx
+                render
+                open_file
+            fi
+            ;;
+        64) move_cursor up ;;
+        65) move_cursor down ;;
+    esac
+}
+
 # --- キー入力 ---
 handle_input() {
     local key
@@ -514,12 +538,27 @@ handle_input() {
                 '[B') move_cursor down ;;
                 '[C') enter_or_open ;;
                 '[D') go_parent ;;
+                '[<')
+                    # SGRマウス: ESC[<ボタン;列;行M(press)/m(release)
+                    local mouse_data="" ch=""
+                    while IFS= read -rsn1 -t 0.05 ch; do
+                        [[ "$ch" == "M" || "$ch" == "m" ]] && break
+                        mouse_data+="$ch"
+                        (( ${#mouse_data} > 20 )) && break
+                    done
+                    if [[ "$ch" == "M" ]]; then
+                        local mb mx my
+                        IFS=';' read -r mb mx my <<< "$mouse_data"
+                        handle_mouse "$mb" "$my"
+                    fi
+                    ;;
             esac ;;
     esac
 }
 
 # --- クリーンアップ ---
 cleanup() {
+    printf '%s' "$MOUSE_OFF"
     printf '%s' "${WRAP}"  # 自動折り返し復帰
     tput cnorm
     tput rmcup
@@ -533,6 +572,7 @@ main() {
 
     tput smcup
     tput civis
+    printf '%s' "$MOUSE_ON"
     trap cleanup EXIT
     trap 'update_term_size; render' WINCH
 
