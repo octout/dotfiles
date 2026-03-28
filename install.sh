@@ -88,6 +88,9 @@ echo "==> Installing tools..."
 install_tmux
 install_claude_code
 
+echo "==> Creating directories..."
+mkdir -p "$HOME/.vim/swap"
+
 echo "==> Linking dotfiles..."
 link_dotfile .inputrc
 link_dotfile .vimrc
