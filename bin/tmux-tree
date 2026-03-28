@@ -281,14 +281,19 @@ build_tree() {
             find "$_t" -maxdepth 1 -not -path "$_t" 2>/dev/null
         done
     } | while IFS= read -r _p; do
-        # ディレクトリ優先ソート: ベースネームの前にタイププレフィックスを付与
-        # ディレクトリ=0, ファイル=1 → ソート後に除去
+        [[ -z "$_p" ]] && continue
+        # ディレクトリ優先ソート: 各パスコンポーネントにタイプ識別子を付与
+        # ディレクトリ=0, ファイル=1 → 階層を保ちつつディレクトリ優先でソート
+        _rel="${_p:$root_len}"
         if [[ -d "$_p" ]]; then
-            printf '%s/0:%s\n' "${_p%/*}" "${_p##*/}"
+            printf '0%s/\t%s\n' "${_rel//\//\/0}" "$_p"
+        elif [[ "$_rel" == */* ]]; then
+            _par="${_rel%/*}"
+            printf '0%s/1%s\t%s\n' "${_par//\//\/0}" "${_rel##*/}" "$_p"
         else
-            printf '%s/1:%s\n' "${_p%/*}" "${_p##*/}"
+            printf '1%s\t%s\n' "$_rel" "$_p"
         fi
-    done | LC_ALL=C sort | sed 's|/[01]:|/|')
+    done | LC_ALL=C sort -t$'\t' -k1,1 | cut -f2)
 
     # Phase 2: 逆方向パスで末尾兄弟判定
     local _count=${#_rel_arr[@]}
