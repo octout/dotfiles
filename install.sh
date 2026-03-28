@@ -89,6 +89,7 @@ install_tmux
 install_claude_code
 
 echo "==> Linking dotfiles..."
+link_dotfile .inputrc
 link_dotfile .tmux.conf
 link_dotfile .claude/CLAUDE.md
 
