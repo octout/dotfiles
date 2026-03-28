@@ -59,6 +59,7 @@ _GIT_SPLAIN=""
 _GIT_SCOLORED=""
 _CACHED_GIT_DIR=""
 _CACHED_GIT_MTIME=""
+_CACHED_GIT_HEAD_MTIME=""
 _CACHED_ROOT=""
 EDITOR_PANE=""
 IS_WORKTREE=false
@@ -91,14 +92,16 @@ update_git_info() {
     # rootが変わったらキャッシュ無効化
     if [[ "$root" != "$_CACHED_ROOT" ]]; then
         _CACHED_GIT_DIR=""
+        _CACHED_GIT_HEAD_MTIME=""
         _CACHED_ROOT="$root"
     fi
 
-    # mtime-based cache: .git/indexが未変更ならgit情報を再利用
+    # mtime-based cache: .git/index / HEAD が未変更ならgit情報を再利用
     if $IS_GIT_REPO && [[ -n "$_CACHED_GIT_DIR" ]]; then
-        local _mtime
+        local _mtime _head_mtime
         _mtime=$(stat -c %Y "$_CACHED_GIT_DIR/index" 2>/dev/null)
-        [[ "$_mtime" == "$_CACHED_GIT_MTIME" ]] && return
+        _head_mtime=$(stat -c %Y "$_CACHED_GIT_DIR/HEAD" 2>/dev/null)
+        [[ "$_mtime" == "$_CACHED_GIT_MTIME" && "$_head_mtime" == "$_CACHED_GIT_HEAD_MTIME" ]] && return
     fi
 
     GIT_STATUS=()
@@ -108,6 +111,7 @@ update_git_info() {
     GIT_ROOT="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)" || {
         IS_GIT_REPO=false
         _CACHED_GIT_DIR=""
+        _CACHED_GIT_HEAD_MTIME=""
         return
     }
     IS_GIT_REPO=true
@@ -151,6 +155,7 @@ update_git_info() {
     # git dirのmtimeを記録 (次回キャッシュ判定用)
     _CACHED_GIT_DIR="$(cd "$root" && cd "$(git rev-parse --git-dir 2>/dev/null)" && pwd 2>/dev/null)"
     _CACHED_GIT_MTIME=$(stat -c %Y "$_CACHED_GIT_DIR/index" 2>/dev/null)
+    _CACHED_GIT_HEAD_MTIME=$(stat -c %Y "$_CACHED_GIT_DIR/HEAD" 2>/dev/null)
 }
 
 # --- worktreeフッターセクション構築 ---
