@@ -214,13 +214,9 @@ build_tree() {
     local filter_worktrees=false
     [[ "$root" != *"/.claude/worktrees/"* ]] && filter_worktrees=true
 
-    # インデント文字列を事前計算
-    local -a indent_plain=("") indent_colored=("")
-    local d
-    for ((d=1; d<=MAX_DEPTH; d++)); do
-        indent_plain[d]="${indent_plain[d-1]}│ "
-        indent_colored[d]="${indent_colored[d-1]}${C_TREE}│ ${C_RESET}"
-    done
+    # Phase 1: 中間配列に収集
+    local -a _rel_arr=() _depth_arr=() _type_arr=() _name_arr=()
+    local -a _gplain_arr=() _gcolor_arr=() _fpath_arr=()
 
     while IFS= read -r filepath; do
         local rel="${filepath:$root_len}"
@@ -228,7 +224,6 @@ build_tree() {
         if [[ -n "$IGNORE_PATTERN" && "$rel" =~ (^|/)($IGNORE_PATTERN)(/|$) ]]; then
             continue
         fi
-        # .claude/worktrees はツリーに表示しない
         $filter_worktrees && [[ "$filepath" == *"/.claude/worktrees"* ]] && continue
 
         local stripped="${rel//[^\/]/}"
@@ -248,27 +243,77 @@ build_tree() {
             (( vis == 0 )) && continue
         fi
 
-        local ip="${indent_plain[$depth]}"
-        local ic="${indent_colored[$depth]}"
         local name="${rel##*/}"
-
         local git_rel=""
         $IS_GIT_REPO && git_rel="${filepath#$GIT_ROOT/}"
         git_status_label "$git_rel"
 
-        if [[ -d "$filepath" ]]; then
+        _rel_arr+=("$rel")
+        _depth_arr+=("$depth")
+        _name_arr+=("$name")
+        _gplain_arr+=("$_GIT_SPLAIN")
+        _gcolor_arr+=("$_GIT_SCOLORED")
+        _fpath_arr+=("$filepath")
+        [[ -d "$filepath" ]] && _type_arr+=("d") || _type_arr+=("f")
+    done < <(find "$root" -maxdepth "$MAX_DEPTH" -not -path "$root" 2>/dev/null | LC_ALL=C sort)
+
+    # Phase 2: 逆方向パスで末尾兄弟判定
+    local _count=${#_rel_arr[@]}
+    local -a _last_sib=()
+    local -a _seen_depth=()
+    local idx dd
+
+    for ((idx=_count-1; idx>=0; idx--)); do
+        local d=${_depth_arr[$idx]}
+        for ((dd=d+1; dd<=MAX_DEPTH; dd++)); do
+            _seen_depth[$dd]=0
+        done
+        if (( ${_seen_depth[$d]:-0} == 0 )); then
+            _last_sib[$idx]=1
+            _seen_depth[$d]=1
+        else
+            _last_sib[$idx]=0
+        fi
+    done
+
+    # Phase 3: 順方向パスで罫線付き表示文字列を構築
+    local -a _is_last_at_depth=()
+    for ((idx=0; idx<_count; idx++)); do
+        local d=${_depth_arr[$idx]}
+
+        # 祖先の末尾状態から動的にインデントを構築
+        local ip="" ic=""
+        for ((dd=0; dd<d; dd++)); do
+            if (( ${_is_last_at_depth[$dd]:-0} )); then
+                ip+="  "
+                ic+="  "
+            else
+                ip+="│ "
+                ic+="${C_TREE}│ ${C_RESET}"
+            fi
+        done
+
+        local name="${_name_arr[$idx]}"
+        local gp="${_gplain_arr[$idx]}"
+        local gc="${_gcolor_arr[$idx]}"
+
+        if [[ "${_type_arr[$idx]}" == "d" ]]; then
             local m="▸"
-            [[ "${EXPANDED[$rel]:-}" == "1" ]] && m="▾"
-            PLAINS+=("${ip}${m} ${name}/${_GIT_SPLAIN}")
-            COLORED+=("${ic}${C_DIR}${m} ${name}/${C_RESET}${_GIT_SCOLORED}")
+            [[ "${EXPANDED[${_rel_arr[$idx]}]:-}" == "1" ]] && m="▾"
+            PLAINS+=("${ip}${m} ${name}/${gp}")
+            COLORED+=("${ic}${C_DIR}${m} ${name}/${C_RESET}${gc}")
             TYPES+=("d")
         else
-            PLAINS+=("${ip}├ ${name}${_GIT_SPLAIN}")
-            COLORED+=("${ic}${C_TREE}├ ${C_RESET}${name}${_GIT_SCOLORED}")
+            local bc="├"
+            (( _last_sib[idx] )) && bc="└"
+            PLAINS+=("${ip}${bc} ${name}${gp}")
+            COLORED+=("${ic}${C_TREE}${bc} ${C_RESET}${name}${gc}")
             TYPES+=("f")
         fi
-        PATHS+=("$filepath")
-    done < <(find "$root" -maxdepth "$MAX_DEPTH" -not -path "$root" 2>/dev/null | LC_ALL=C sort)
+        PATHS+=("${_fpath_arr[$idx]}")
+
+        _is_last_at_depth[$d]=${_last_sib[$idx]}
+    done
 
     local total=${#PLAINS[@]}
     if (( total == 0 )); then
