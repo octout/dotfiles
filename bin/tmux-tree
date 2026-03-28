@@ -280,7 +280,15 @@ build_tree() {
             [[ -d "$_t" ]] || continue
             find "$_t" -maxdepth 1 -not -path "$_t" 2>/dev/null
         done
-    } | LC_ALL=C sort)
+    } | while IFS= read -r _p; do
+        # ディレクトリ優先ソート: ベースネームの前にタイププレフィックスを付与
+        # ディレクトリ=0, ファイル=1 → ソート後に除去
+        if [[ -d "$_p" ]]; then
+            printf '%s/0:%s\n' "${_p%/*}" "${_p##*/}"
+        else
+            printf '%s/1:%s\n' "${_p%/*}" "${_p##*/}"
+        fi
+    done | LC_ALL=C sort | sed 's|/[01]:|/|')
 
     # Phase 2: 逆方向パスで末尾兄弟判定
     local _count=${#_rel_arr[@]}
