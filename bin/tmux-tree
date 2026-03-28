@@ -705,6 +705,7 @@ main() {
 
     tput smcup
     tput civis
+    stty -echo 2>/dev/null
     printf '%s' "$MOUSE_ON"
     trap cleanup EXIT
     trap 'update_term_size; render' WINCH
