@@ -8,7 +8,7 @@ set -u
 # --- 設定 ---
 MAX_DEPTH="${TMUX_TREE_DEPTH:-4}"
 ROOT_DIR="${1:-.}"
-IGNORE_PATTERN="${TMUX_TREE_IGNORE:-.git|node_modules|__pycache__|.venv|.cache}"
+IGNORE_PATTERN="${TMUX_TREE_IGNORE:-.git}"
 EDITOR_CMD="${TMUX_TREE_EDITOR:-vim}"
 SPLIT_DIR="${TMUX_TREE_SPLIT:-h}"
 REFRESH_INTERVAL="${TMUX_TREE_REFRESH:-5}"
@@ -57,6 +57,9 @@ IS_GIT_REPO=false
 declare -A GIT_STATUS=()
 _GIT_SPLAIN=""
 _GIT_SCOLORED=""
+_CACHED_GIT_DIR=""
+_CACHED_GIT_MTIME=""
+_CACHED_ROOT=""
 EDITOR_PANE=""
 IS_WORKTREE=false
 MAIN_REPO_ROOT=""
@@ -83,14 +86,28 @@ update_term_size() {
 
 # --- git情報取得 ---
 update_git_info() {
+    local root="$1"
+
+    # rootが変わったらキャッシュ無効化
+    if [[ "$root" != "$_CACHED_ROOT" ]]; then
+        _CACHED_GIT_DIR=""
+        _CACHED_ROOT="$root"
+    fi
+
+    # mtime-based cache: .git/indexが未変更ならgit情報を再利用
+    if $IS_GIT_REPO && [[ -n "$_CACHED_GIT_DIR" ]]; then
+        local _mtime
+        _mtime=$(stat -c %Y "$_CACHED_GIT_DIR/index" 2>/dev/null)
+        [[ "$_mtime" == "$_CACHED_GIT_MTIME" ]] && return
+    fi
+
     GIT_STATUS=()
     GIT_BRANCH=""
     GIT_ROOT=""
 
-    local root="$1"
-
     GIT_ROOT="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)" || {
         IS_GIT_REPO=false
+        _CACHED_GIT_DIR=""
         return
     }
     IS_GIT_REPO=true
@@ -130,6 +147,10 @@ update_git_info() {
             [[ -z "${GIT_STATUS[$dir]:-}" ]] && GIT_STATUS["$dir"]="*"
         done
     done < <(git -C "$GIT_ROOT" status --porcelain -b 2>/dev/null)
+
+    # git dirのmtimeを記録 (次回キャッシュ判定用)
+    _CACHED_GIT_DIR="$(cd "$root" && cd "$(git rev-parse --git-dir 2>/dev/null)" && pwd 2>/dev/null)"
+    _CACHED_GIT_MTIME=$(stat -c %Y "$_CACHED_GIT_DIR/index" 2>/dev/null)
 }
 
 # --- worktreeフッターセクション構築 ---
@@ -219,6 +240,7 @@ build_tree() {
     local -a _gplain_arr=() _gcolor_arr=() _fpath_arr=()
 
     while IFS= read -r filepath; do
+        [[ -z "$filepath" ]] && continue
         local rel="${filepath:$root_len}"
 
         if [[ -n "$IGNORE_PATTERN" && "$rel" =~ (^|/)($IGNORE_PATTERN)(/|$) ]]; then
@@ -228,20 +250,6 @@ build_tree() {
 
         local stripped="${rel//[^\/]/}"
         local depth=${#stripped}
-
-        if (( depth > 0 )); then
-            local parent_rel="${rel%/*}"
-            local check="$parent_rel"
-            local vis=1
-            while [[ -n "$check" ]]; do
-                if [[ "${EXPANDED[$check]:-}" != "1" ]]; then
-                    vis=0
-                    break
-                fi
-                [[ "$check" == */* ]] && check="${check%/*}" || break
-            done
-            (( vis == 0 )) && continue
-        fi
 
         local name="${rel##*/}"
         local git_rel=""
@@ -255,7 +263,24 @@ build_tree() {
         _gcolor_arr+=("$_GIT_SCOLORED")
         _fpath_arr+=("$filepath")
         [[ -d "$filepath" ]] && _type_arr+=("d") || _type_arr+=("f")
-    done < <(find "$root" -maxdepth "$MAX_DEPTH" -not -path "$root" 2>/dev/null | LC_ALL=C sort)
+    done < <({
+        # 展開済みディレクトリのみ走査 (非展開は直下を列挙するのみ)
+        find "$root" -maxdepth 1 -not -path "$root" 2>/dev/null
+        for _d in "${!EXPANDED[@]}"; do
+            [[ "${EXPANDED[$_d]}" == "1" ]] || continue
+            # 祖先が全て展開されているか確認
+            _a="$_d"; _v=true
+            while [[ "$_a" == */* ]]; do
+                _a="${_a%/*}"
+                [[ "${EXPANDED[$_a]:-}" == "1" ]] || { _v=false; break; }
+            done
+            $_v || continue
+            _s="${_d//[^\/]/}"; (( ${#_s} > MAX_DEPTH - 2 )) && continue
+            _t="${root%/}/$_d"
+            [[ -d "$_t" ]] || continue
+            find "$_t" -maxdepth 1 -not -path "$_t" 2>/dev/null
+        done
+    } | LC_ALL=C sort)
 
     # Phase 2: 逆方向パスで末尾兄弟判定
     local _count=${#_rel_arr[@]}
