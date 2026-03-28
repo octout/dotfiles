@@ -4,6 +4,7 @@ set encoding=utf-8
 set belloff=all
 set backspace=indent,eol,start
 set mouse=a
+set directory=~/.vim/swap//
 
 " --- 表示 ---
 syntax on
