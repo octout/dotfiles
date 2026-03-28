@@ -61,6 +61,10 @@ EDITOR_PANE=""
 IS_WORKTREE=false
 MAIN_REPO_ROOT=""
 HAS_CLAUDE_WORKTREES=false
+declare -a WT_PLAINS=()
+declare -a WT_COLORED=()
+declare -a WT_PATHS=()
+WT_SECTION_LINES=0
 VIEW_MODE="tree"
 SAVED_ROOT_DIR=""
 SAVED_CURSOR=0
@@ -71,7 +75,7 @@ declare -A SAVED_EXPANDED=()
 update_term_size() {
     TERM_LINES="${LINES:-$(tput lines)}"
     TERM_COLS="${COLUMNS:-$(tput cols)}"
-    VISIBLE=$((TERM_LINES - HEADER_LINES - FOOTER_LINES))
+    VISIBLE=$((TERM_LINES - HEADER_LINES - FOOTER_LINES - WT_SECTION_LINES))
     (( VISIBLE < 1 )) && VISIBLE=1
     printf -v HR '%*s' "$TERM_COLS" ''
     HR="${HR// /─}"
@@ -128,6 +132,47 @@ update_git_info() {
     done < <(git -C "$GIT_ROOT" status --porcelain -b 2>/dev/null)
 }
 
+# --- worktreeフッターセクション構築 ---
+build_worktree_footer() {
+    WT_PLAINS=()
+    WT_COLORED=()
+    WT_PATHS=()
+    WT_SECTION_LINES=0
+
+    $IS_GIT_REPO && $HAS_CLAUDE_WORKTREES || return
+
+    local current_root
+    current_root="$(cd "$ROOT_DIR" && pwd)"
+
+    local wt_dir="$MAIN_REPO_ROOT/.claude/worktrees"
+
+    # メインリポジトリ
+    local main_branch marker
+    main_branch="$(git -C "$MAIN_REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+    marker="  "
+    [[ "$current_root" == "$MAIN_REPO_ROOT" ]] && marker="${C_HEADER}●${C_RESET} "
+    WT_PLAINS+=("  main [${main_branch}]")
+    WT_COLORED+=("  ${marker}${C_DIR}main${C_RESET} ${C_BRANCH}[${main_branch}]${C_RESET}")
+    WT_PATHS+=("$MAIN_REPO_ROOT")
+
+    # 各worktree
+    local dir name branch
+    for dir in "$wt_dir"/*/; do
+        [[ -d "$dir" ]] || continue
+        name="${dir%/}"
+        name="${name##*/}"
+        branch="$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)" || branch="?"
+        marker="  "
+        [[ "$current_root" == "${dir%/}" ]] && marker="${C_HEADER}●${C_RESET} "
+        WT_PLAINS+=("  ${name} [${branch}]")
+        WT_COLORED+=("  ${marker}${C_WORKTREE}${name}${C_RESET} ${C_BRANCH}[${branch}]${C_RESET}")
+        WT_PATHS+=("${dir%/}")
+    done
+
+    # 1 (HR) + 1 (header) + entries
+    WT_SECTION_LINES=$(( 2 + ${#WT_PLAINS[@]} ))
+}
+
 # --- gitステータスラベル生成 (結果は _GIT_SPLAIN, _GIT_SCOLORED に格納) ---
 git_status_label() {
     _GIT_SPLAIN=""
@@ -157,6 +202,8 @@ build_tree() {
     root="$(cd "$ROOT_DIR" && pwd)"
 
     update_git_info "$root"
+    build_worktree_footer
+    update_term_size
 
     DISPLAY_ROOT="${root/#$HOME/\~}"
 
@@ -275,13 +322,21 @@ render() {
         fi
     done
 
+    # worktreeセクション (treeビューかつworktreeがある場合)
+    if [[ "$VIEW_MODE" == "tree" ]] && (( ${#WT_PLAINS[@]} > 0 )); then
+        buf+="${C_TREE}${HR}${C_RESET}${CLR}${NL}"
+        buf+=" ${C_TREE}worktrees${C_RESET} ${C_TREE}[w]${C_RESET}${CLR}${NL}"
+        local wi
+        for ((wi=0; wi<${#WT_PLAINS[@]}; wi++)); do
+            buf+="${WT_COLORED[$wi]}${CLR}${NL}"
+        done
+    fi
+
     # フッタ (最終行は NL なし → スクロール防止)
     buf+="${C_TREE}${HR}${C_RESET}${CLR}${NL}"
     local help_keys
     if [[ "$VIEW_MODE" == "worktree" ]]; then
         help_keys="j/k Enter h/q [${pos}/${total}]"
-    elif $HAS_CLAUDE_WORKTREES; then
-        help_keys="j/k Enter Space h/l r q w [${pos}/${total}]"
     else
         help_keys="j/k Enter Space h/l r q [${pos}/${total}]"
     fi
