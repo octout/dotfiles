@@ -93,6 +93,7 @@ link_dotfile .inputrc
 link_dotfile .vimrc
 link_dotfile .tmux.conf
 link_dotfile .claude/CLAUDE.md
+link_dotfile .claude/settings.json
 
 echo "==> Setting up PATH..."
 setup_path

@@ -20,7 +20,8 @@ git clone https://github.com/octout/dotfiles ~/dotfiles
 |------|------|
 | `bin/` | 自作スクリプト・ツール (PATH に追加される) |
 | `install.sh` | セットアップスクリプト |
-| `.claude/CLAUDE.md` | Claude Code グローバル設定 |
+| `.claude/CLAUDE.md` | Claude Code グローバル指示 |
+| `.claude/settings.json` | Claude Code グローバル設定 |
 | `.tmux.conf` | tmux 設定 |
 
 ## ツール
