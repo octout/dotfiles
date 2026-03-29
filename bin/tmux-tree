@@ -74,8 +74,8 @@ declare -A SAVED_EXPANDED=()
 
 # --- ターミナルサイズ更新 ---
 update_term_size() {
-    TERM_LINES="${LINES:-$(tput lines)}"
-    TERM_COLS="${COLUMNS:-$(tput cols)}"
+    TERM_LINES=$(tput lines)
+    TERM_COLS=$(tput cols)
     VISIBLE=$((TERM_LINES - HEADER_LINES - FOOTER_LINES - WT_SECTION_LINES))
     (( VISIBLE < 1 )) && VISIBLE=1
     printf -v HR '%*s' "$TERM_COLS" ''
