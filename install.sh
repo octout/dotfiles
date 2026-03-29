@@ -63,6 +63,26 @@ link_dotfile() {
     echo "  link: $dest -> $src"
 }
 
+# --- gitconfig の include 設定 ---
+setup_gitconfig() {
+    local include_path="$REPO_DIR/.gitconfig"
+    local tilde_path="${include_path/#$HOME/\~}"
+
+    # 既にincludeされているか確認 (~/ 形式と絶対パス両方)
+    local existing
+    existing="$(git config --global --get-all include.path 2>/dev/null)" || true
+    if [[ -n "$existing" ]]; then
+        if printf '%s\n' "$existing" | grep -qxF "$tilde_path" || \
+           printf '%s\n' "$existing" | grep -qxF "$include_path"; then
+            echo "  skip: .gitconfig include already configured"
+            return
+        fi
+    fi
+
+    git config --global --add include.path "$tilde_path"
+    echo "  added: include.path = $tilde_path to ~/.gitconfig"
+}
+
 # --- PATH 追加 ---
 setup_path() {
     local shell_rc=""
@@ -97,6 +117,9 @@ link_dotfile .vimrc
 link_dotfile .tmux.conf
 link_dotfile .claude/CLAUDE.md
 link_dotfile .claude/settings.json
+
+echo "==> Setting up gitconfig..."
+setup_gitconfig
 
 echo "==> Setting up PATH..."
 setup_path
