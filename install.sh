@@ -41,6 +41,16 @@ install_claude_code() {
     echo "  installed: claude code"
 }
 
+install_vim_plugins() {
+    local plugin_dir="$REPO_DIR/.vim/pack/plugins/start/vim-gitgutter"
+    if [[ -d "$plugin_dir/.git" ]] || [[ -f "$plugin_dir/.git" ]]; then
+        echo "  skip: vim plugins already initialized"
+        return
+    fi
+    git -C "$REPO_DIR" submodule update --init --recursive
+    echo "  installed: vim plugins (git submodule)"
+}
+
 # --- dotfiles のシンボリックリンク作成 ---
 link_dotfile() {
     local src="$REPO_DIR/$1"
@@ -107,6 +117,7 @@ setup_path() {
 echo "==> Installing tools..."
 install_tmux
 install_claude_code
+install_vim_plugins
 
 echo "==> Creating directories..."
 mkdir -p "$HOME/.vim/swap"
@@ -117,6 +128,7 @@ link_dotfile .vimrc
 link_dotfile .tmux.conf
 link_dotfile .claude/CLAUDE.md
 link_dotfile .claude/settings.json
+link_dotfile .vim/pack/plugins/start/vim-gitgutter
 
 echo "==> Setting up gitconfig..."
 setup_gitconfig
