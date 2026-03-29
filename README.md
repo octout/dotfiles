@@ -5,7 +5,7 @@
 ## セットアップ
 
 ```bash
-git clone https://github.com/octout/dotfiles ~/dotfiles
+git clone --recurse-submodules https://github.com/octout/dotfiles ~/dotfiles
 ~/dotfiles/install.sh
 ```
 
@@ -20,9 +20,28 @@ git clone https://github.com/octout/dotfiles ~/dotfiles
 |------|------|
 | `bin/` | 自作スクリプト・ツール (PATH に追加される) |
 | `install.sh` | セットアップスクリプト |
+| `.vimrc` | Vim 設定 |
+| `.vim/pack/` | Vim プラグイン (git submodule) |
 | `.claude/CLAUDE.md` | Claude Code グローバル指示 |
 | `.claude/settings.json` | Claude Code グローバル設定 |
 | `.tmux.conf` | tmux 設定 |
+
+## Vim
+
+プラグインは Vim 8 のネイティブパッケージ機構 (`pack/*/start/`) で管理し、git submodule でバージョンを固定している。
+
+| プラグイン | 説明 |
+|-----------|------|
+| [vim-gitgutter](https://github.com/airblade/vim-gitgutter) | サイン列に git diff を表示 (`+` 追加 / `~` 変更 / `-` 削除) |
+
+主なキーバインド (gitgutter):
+
+| キー | 操作 |
+|------|------|
+| `]c` / `[c` | 次/前の変更箇所へジャンプ |
+| `<leader>hp` | 変更箇所をプレビュー |
+| `<leader>hs` | 変更箇所をステージ |
+| `<leader>hu` | 変更箇所を元に戻す |
 
 ## ツール
 
