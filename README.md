@@ -30,9 +30,9 @@ git clone --recurse-submodules https://github.com/octout/dotfiles ~/dotfiles
 
 プラグインは Vim 8 のネイティブパッケージ機構 (`pack/*/start/`) で管理し、git submodule でバージョンを固定している。
 
-| プラグイン | 説明 |
-|-----------|------|
-| [vim-gitgutter](https://github.com/airblade/vim-gitgutter) | サイン列に git diff を表示 (`+` 追加 / `~` 変更 / `-` 削除) |
+| プラグイン | バージョン | 説明 |
+|-----------|-----------|------|
+| [vim-gitgutter](https://github.com/airblade/vim-gitgutter) | [`55b368d`](https://github.com/airblade/vim-gitgutter/commit/55b368d) | サイン列に git diff を表示 (`+` 追加 / `~` 変更 / `-` 削除) |
 
 主なキーバインド (gitgutter):
 
