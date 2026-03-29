@@ -28,3 +28,7 @@ set shiftwidth=4
 " --- Git ---
 set updatetime=100
 set signcolumn=yes
+highlight SignColumn      ctermbg=NONE
+highlight GitGutterAdd    ctermfg=2 ctermbg=NONE
+highlight GitGutterChange ctermfg=3 ctermbg=NONE
+highlight GitGutterDelete ctermfg=1 ctermbg=NONE
