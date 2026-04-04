@@ -13,7 +13,7 @@ fi
 # --- シェル互換レイヤー ---
 _ASSOC_KEYS=()
 if [[ -n "${ZSH_VERSION:-}" ]]; then
-    setopt KSH_ARRAYS
+    setopt KSH_ARRAYS NO_NOMATCH
     readc() { IFS= read -rsk"$@"; }
     assoc_keys() { eval '_ASSOC_KEYS=("${(k)'"$1"'[@]}")'; }
 else
