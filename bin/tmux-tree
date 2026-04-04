@@ -1,9 +1,25 @@
 #!/usr/bin/env bash
 #
 # tmux-tree: tmux pane内で動作するファイルツリーブラウザ
-# 依存: bash(4+), find, tput, tmux
+# 依存: bash(4+) or zsh, find, tput, tmux
 #
 set -u
+
+# --- bash 4未満の場合、zshで再実行 ---
+if [[ -n "${BASH_VERSION:-}" ]] && (( ${BASH_VERSION%%.*} < 4 )); then
+    exec zsh "$0" "$@"
+fi
+
+# --- シェル互換レイヤー ---
+_ASSOC_KEYS=()
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+    setopt KSH_ARRAYS
+    readc() { IFS= read -rsk"$@"; }
+    assoc_keys() { eval '_ASSOC_KEYS=("${(k)'"$1"'[@]}")'; }
+else
+    readc() { IFS= read -rsn"$@"; }
+    assoc_keys() { eval '_ASSOC_KEYS=("${!'"$1"'[@]}")'; }
+fi
 
 # --- 設定 ---
 MAX_DEPTH="${TMUX_TREE_DEPTH:-4}"
@@ -251,7 +267,8 @@ build_tree() {
     done < <({
         # 展開済みディレクトリのみ走査 (非展開は直下を列挙するのみ)
         find "$root" -maxdepth 1 -not -path "$root" 2>/dev/null
-        for _d in "${!EXPANDED[@]}"; do
+        assoc_keys EXPANDED
+        for _d in "${_ASSOC_KEYS[@]}"; do
             [[ "${EXPANDED[$_d]}" == "1" ]] || continue
             # 祖先が全て展開されているか確認
             _a="$_d"; _v=true
@@ -474,7 +491,8 @@ toggle_worktree_view() {
         SAVED_SCROLL_OFFSET=$SCROLL_OFFSET
         SAVED_EXPANDED=()
         local k
-        for k in "${!EXPANDED[@]}"; do
+        assoc_keys EXPANDED
+        for k in "${_ASSOC_KEYS[@]}"; do
             SAVED_EXPANDED["$k"]="${EXPANDED[$k]}"
         done
 
@@ -496,7 +514,8 @@ restore_tree_view() {
     SCROLL_OFFSET=$SAVED_SCROLL_OFFSET
     EXPANDED=()
     local k
-    for k in "${!SAVED_EXPANDED[@]}"; do
+    assoc_keys SAVED_EXPANDED
+    for k in "${_ASSOC_KEYS[@]}"; do
         EXPANDED["$k"]="${SAVED_EXPANDED[$k]}"
     done
     refresh
@@ -636,7 +655,7 @@ handle_mouse() {
 # --- キー入力 ---
 handle_input() {
     local key
-    if ! IFS= read -rsn1 -t "$REFRESH_INTERVAL" key; then
+    if ! readc 1 -t "$REFRESH_INTERVAL" key; then
         refresh
         return
     fi
@@ -655,7 +674,7 @@ handle_input() {
         q) if [[ "$VIEW_MODE" == "worktree" ]]; then restore_tree_view; else exit 0; fi ;;
         $'\e')
             local seq
-            IFS= read -rsn2 -t 0.05 seq
+            readc 2 -t 0.05 seq
             case "$seq" in
                 '[A') move_cursor up ;;
                 '[B') move_cursor down ;;
@@ -664,7 +683,7 @@ handle_input() {
                 '[<')
                     # SGRマウス: ESC[<ボタン;列;行M(press)/m(release)
                     local mouse_data="" ch=""
-                    while IFS= read -rsn1 -t 0.05 ch; do
+                    while readc 1 -t 0.05 ch; do
                         [[ "$ch" == "M" || "$ch" == "m" ]] && break
                         mouse_data+="$ch"
                         (( ${#mouse_data} > 20 )) && break
