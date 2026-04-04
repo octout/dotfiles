@@ -26,6 +26,27 @@ install_tmux() {
     echo "  installed: tmux ($(tmux -V))"
 }
 
+install_vim() {
+    if command -v vim &>/dev/null; then
+        echo "  skip: vim already installed ($(vim --version | head -1))"
+        return
+    fi
+
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get update -qq && sudo apt-get install -y -qq vim
+    elif command -v dnf &>/dev/null; then
+        sudo dnf install -y vim
+    elif command -v pacman &>/dev/null; then
+        sudo pacman -S --noconfirm vim
+    elif command -v brew &>/dev/null; then
+        brew install vim
+    else
+        echo "  error: パッケージマネージャが見つかりません。手動で vim をインストールしてください。"
+        return 1
+    fi
+    echo "  installed: vim ($(vim --version | head -1))"
+}
+
 install_claude_code() {
     if command -v claude &>/dev/null; then
         echo "  skip: claude already installed ($(claude --version 2>/dev/null || echo 'unknown'))"
@@ -116,6 +137,7 @@ setup_path() {
 
 echo "==> Installing tools..."
 install_tmux
+install_vim
 install_claude_code
 install_vim_plugins
 
