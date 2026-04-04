@@ -7,12 +7,15 @@ set -u
 
 # --- bash 4未満の場合、zshで再実行 ---
 if [[ -n "${BASH_VERSION:-}" ]] && (( ${BASH_VERSION%%.*} < 4 )); then
+    export _TMUX_TREE_PATH="$PATH"
     exec zsh "$0" "$@"
 fi
 
 # --- シェル互換レイヤー ---
 _ASSOC_KEYS=()
 if [[ -n "${ZSH_VERSION:-}" ]]; then
+    # zsh起動時にpath_helperがPATHを上書きする場合があるため復元
+    [[ -n "${_TMUX_TREE_PATH:-}" ]] && export PATH="$_TMUX_TREE_PATH"
     setopt KSH_ARRAYS NO_NOMATCH
     readc() { IFS= read -rsk"$@"; }
     assoc_keys() { eval '_ASSOC_KEYS=("${(k)'"$1"'[@]}")'; }
@@ -583,7 +586,7 @@ toggle_collapse() {
     local rel="${path#$root_slash}"
 
     if [[ "${EXPANDED[$rel]:-}" == "1" ]]; then
-        unset 'EXPANDED[$rel]'
+        unset "EXPANDED[$rel]"
     else
         EXPANDED[$rel]="1"
     fi
@@ -665,7 +668,7 @@ handle_input() {
         k) move_cursor up ;;
         g) move_cursor top ;;
         G) move_cursor bottom ;;
-        "") open_file ;;
+        ""|$'\n') open_file ;;
         " ") toggle_collapse ;;
         l) enter_or_open ;;
         h) go_parent ;;
