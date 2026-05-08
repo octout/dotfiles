@@ -11,6 +11,7 @@ git clone --recurse-submodules https://github.com/octout/dotfiles ~/dotfiles
 
 `install.sh` は以下を実行する:
 
+- ツール (`tmux`, `vim`, Claude Code, `nvm` + Node.js LTS, AWS CLI v2, `difit`) を未導入の場合のみインストール
 - dotfiles (`~/.tmux.conf` 等) をホームディレクトリにシンボリックリンク
 - `bin/` を PATH に追加
 
