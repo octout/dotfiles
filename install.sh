@@ -62,6 +62,38 @@ install_claude_code() {
     echo "  installed: claude code"
 }
 
+install_gh() {
+    if command -v gh &>/dev/null; then
+        echo "  skip: gh already installed ($(gh --version | head -1))"
+        return
+    fi
+
+    if command -v apt-get &>/dev/null; then
+        if ! command -v curl &>/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq curl
+        fi
+        sudo mkdir -p -m 755 /etc/apt/keyrings
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | \
+            sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
+        sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | \
+            sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+        sudo apt-get update -qq && sudo apt-get install -y -qq gh
+    elif command -v dnf &>/dev/null; then
+        sudo dnf install -y 'dnf-command(config-manager)'
+        sudo dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
+        sudo dnf install -y gh --repo gh-cli
+    elif command -v pacman &>/dev/null; then
+        sudo pacman -S --noconfirm github-cli
+    elif command -v brew &>/dev/null; then
+        brew install gh
+    else
+        echo "  error: パッケージマネージャが見つかりません。手動で gh をインストールしてください。"
+        return 1
+    fi
+    echo "  installed: gh ($(gh --version | head -1))"
+}
+
 NVM_VERSION="v0.40.4"
 
 install_nvm() {
@@ -242,6 +274,7 @@ echo "==> Installing tools..."
 install_tmux
 install_vim
 install_claude_code
+install_gh
 install_nvm
 install_node
 install_aws_cli
