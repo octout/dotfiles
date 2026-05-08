@@ -94,6 +94,69 @@ install_gh() {
     echo "  installed: gh ($(gh --version | head -1))"
 }
 
+install_docker() {
+    if command -v docker &>/dev/null; then
+        echo "  skip: docker already installed ($(docker --version))"
+        return
+    fi
+
+    local os
+    os="$(uname -s)"
+    case "$os" in
+        Linux)
+            if command -v apt-get &>/dev/null; then
+                local codename id
+                . /etc/os-release
+                id="${ID:-debian}"
+                codename="${VERSION_CODENAME:-}"
+                [[ -z "$codename" ]] && codename="$(lsb_release -cs 2>/dev/null || echo stable)"
+
+                sudo apt-get update -qq
+                sudo apt-get install -y -qq ca-certificates curl
+                sudo install -m 0755 -d /etc/apt/keyrings
+                sudo curl -fsSL "https://download.docker.com/linux/${id}/gpg" -o /etc/apt/keyrings/docker.asc
+                sudo chmod a+r /etc/apt/keyrings/docker.asc
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${id} ${codename} stable" | \
+                    sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+                sudo apt-get update -qq
+                sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            elif command -v dnf &>/dev/null; then
+                sudo dnf install -y dnf-plugins-core
+                sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+                sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+                sudo systemctl enable --now docker
+            elif command -v pacman &>/dev/null; then
+                sudo pacman -S --noconfirm docker docker-buildx docker-compose
+                sudo systemctl enable --now docker
+            else
+                echo "  error: パッケージマネージャが見つかりません。手動で docker をインストールしてください。"
+                return 1
+            fi
+
+            if ! getent group docker &>/dev/null; then
+                sudo groupadd docker
+            fi
+            if ! id -nG "$USER" | tr ' ' '\n' | grep -qx docker; then
+                sudo usermod -aG docker "$USER"
+                echo "  note: $USER を docker グループに追加。反映には再ログインが必要"
+            fi
+            ;;
+        Darwin)
+            if command -v brew &>/dev/null; then
+                brew install --cask docker
+            else
+                echo "  error: brew が見つかりません。Docker Desktop を手動でインストールしてください。"
+                return 1
+            fi
+            ;;
+        *)
+            echo "  error: unsupported OS: $os"
+            return 1
+            ;;
+    esac
+    echo "  installed: docker ($(docker --version 2>/dev/null || echo 'unknown'))"
+}
+
 NVM_VERSION="v0.40.4"
 
 install_nvm() {
@@ -275,6 +338,7 @@ install_tmux
 install_vim
 install_claude_code
 install_gh
+install_docker
 install_nvm
 install_node
 install_aws_cli
