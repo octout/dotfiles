@@ -62,6 +62,141 @@ install_claude_code() {
     echo "  installed: claude code"
 }
 
+install_gh() {
+    if command -v gh &>/dev/null; then
+        echo "  skip: gh already installed ($(gh --version | head -1))"
+        return
+    fi
+
+    if command -v apt-get &>/dev/null; then
+        if ! command -v curl &>/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq curl
+        fi
+        sudo mkdir -p -m 755 /etc/apt/keyrings
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | \
+            sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
+        sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | \
+            sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+        sudo apt-get update -qq && sudo apt-get install -y -qq gh
+    elif command -v dnf &>/dev/null; then
+        sudo dnf install -y 'dnf-command(config-manager)'
+        sudo dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
+        sudo dnf install -y gh --repo gh-cli
+    elif command -v pacman &>/dev/null; then
+        sudo pacman -S --noconfirm github-cli
+    elif command -v brew &>/dev/null; then
+        brew install gh
+    else
+        echo "  error: パッケージマネージャが見つかりません。手動で gh をインストールしてください。"
+        return 1
+    fi
+    echo "  installed: gh ($(gh --version | head -1))"
+}
+
+NVM_VERSION="v0.40.4"
+
+install_nvm() {
+    export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+
+    if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+        echo "  skip: nvm already installed ($NVM_DIR)"
+        return
+    fi
+
+    if ! command -v curl &>/dev/null; then
+        echo "  error: curl が見つかりません。"
+        return 1
+    fi
+
+    PROFILE=/dev/null curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" | bash
+    echo "  installed: nvm ${NVM_VERSION}"
+}
+
+install_node() {
+    export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+    # shellcheck disable=SC1091
+    [[ -s "$NVM_DIR/nvm.sh" ]] && . "$NVM_DIR/nvm.sh"
+
+    if ! command -v nvm &>/dev/null; then
+        echo "  skip: nvm not loaded — node のインストールをスキップ"
+        return
+    fi
+
+    if [[ -n "$(nvm version --no-colors node 2>/dev/null | grep -v 'N/A')" ]]; then
+        echo "  skip: node already installed via nvm ($(nvm current))"
+        return
+    fi
+
+    nvm install --lts
+    nvm alias default "lts/*" >/dev/null
+    echo "  installed: node $(node -v) via nvm"
+}
+
+install_aws_cli() {
+    if command -v aws &>/dev/null; then
+        echo "  skip: aws cli already installed ($(aws --version 2>&1))"
+        return
+    fi
+
+    local os arch
+    os="$(uname -s)"
+    arch="$(uname -m)"
+
+    case "$os" in
+        Linux)
+            if ! command -v unzip &>/dev/null; then
+                echo "  error: unzip が見つかりません。先に unzip をインストールしてください。"
+                return 1
+            fi
+            local url
+            case "$arch" in
+                x86_64)        url="https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" ;;
+                aarch64|arm64) url="https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" ;;
+                *) echo "  error: unsupported arch: $arch"; return 1 ;;
+            esac
+            local tmp
+            tmp="$(mktemp -d)"
+            curl -fsSL "$url" -o "$tmp/awscliv2.zip"
+            unzip -q "$tmp/awscliv2.zip" -d "$tmp"
+            sudo "$tmp/aws/install" --update
+            rm -rf "$tmp"
+            ;;
+        Darwin)
+            if command -v brew &>/dev/null; then
+                brew install awscli
+            else
+                echo "  error: brew が見つかりません。手動で AWS CLI をインストールしてください。"
+                return 1
+            fi
+            ;;
+        *)
+            echo "  error: unsupported OS: $os"
+            return 1
+            ;;
+    esac
+    echo "  installed: aws cli ($(aws --version 2>&1))"
+}
+
+install_difit() {
+    export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+    # shellcheck disable=SC1091
+    [[ -s "$NVM_DIR/nvm.sh" ]] && . "$NVM_DIR/nvm.sh"
+
+    if ! command -v npm &>/dev/null; then
+        echo "  error: npm が見つかりません。先に node をインストールしてください。"
+        return 1
+    fi
+
+    if command -v difit &>/dev/null; then
+        echo "  skip: difit already installed ($(difit --version 2>/dev/null || echo 'unknown'))"
+        return
+    fi
+
+    npm install -g difit
+    echo "  installed: difit ($(difit --version 2>/dev/null || echo 'unknown'))"
+}
+
 install_vim_plugins() {
     local plugin_dir="$REPO_DIR/.vim/pack/plugins/start/vim-gitgutter"
     if [[ -d "$plugin_dir/.git" ]] || [[ -f "$plugin_dir/.git" ]]; then
@@ -139,6 +274,11 @@ echo "==> Installing tools..."
 install_tmux
 install_vim
 install_claude_code
+install_gh
+install_nvm
+install_node
+install_aws_cli
+install_difit
 install_vim_plugins
 
 echo "==> Creating directories..."
